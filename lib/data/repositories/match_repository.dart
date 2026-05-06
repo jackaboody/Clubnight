@@ -48,31 +48,52 @@ class MatchRepository {
     final batch = _db.batch();
     final now = DateTime.now();
 
+    // Courts whose nextMatch is being promoted → will have a currentMatch after
+    // this batch commits.
+    final activatingCourtIds = output.courtsToActivateNextMatch
+        .where((c) => c.nextMatchId != null)
+        .map((c) => c.id)
+        .toSet();
+
+    // Courts whose match ended with no queued nextMatch → being freed.
+    final freedCourtIds = output.courtsToActivateNextMatch
+        .where((c) => c.nextMatchId == null)
+        .map((c) => c.id)
+        .toSet();
+
     // 1. Activate pending next matches on courts that just freed up.
     for (final court in output.courtsToActivateNextMatch) {
+      final courtRef = _db.collection('courts').doc(court.id);
       if (court.nextMatchId != null) {
         // Promote nextMatch → currentMatch.
-        final courtRef = _db.collection('courts').doc(court.id);
-        final matchRef = _db.collection('matches').doc(court.nextMatchId);
-
         batch.update(courtRef, {
           'currentMatchId': court.nextMatchId,
           'nextMatchId': null,
         });
-        batch.update(matchRef, {
+        batch.update(_db.collection('matches').doc(court.nextMatchId), {
           'status': MatchStatus.active.name,
           'startedAt': Timestamp.fromDate(now),
           'expectedEndAt': Timestamp.fromDate(
             now.add(Duration(minutes: matchDurationMinutes)),
           ),
         });
+      } else {
+        // Match ended with nothing queued — clear the court so it shows free.
+        batch.update(courtRef, {'currentMatchId': null});
       }
     }
 
-    // 2. Create new nextMatch documents and assign to courts.
+    // 2. Create new match documents and assign to courts.
     for (final scheduled in output.newNextMatches) {
-      final matchRef = _db.collection('matches').doc(); // auto-ID
+      final matchRef = _db.collection('matches').doc();
       final courtRef = _db.collection('courts').doc(scheduled.court.id);
+
+      // Start immediately if the court has no current match, accounting for
+      // courts being freed or activated within this same batch.
+      final courtWillBeFree = scheduled.court.currentMatchId == null ||
+          freedCourtIds.contains(scheduled.court.id);
+      final startNow =
+          courtWillBeFree && !activatingCourtIds.contains(scheduled.court.id);
 
       batch.set(matchRef, {
         'playerIds': scheduled.matchResult.players.map((p) => p.id).toList(),
@@ -80,14 +101,19 @@ class MatchRepository {
             ? 'doubles'
             : 'singles',
         'courtId': scheduled.court.id,
-        'status': MatchStatus.scheduled.name,
-        'startedAt': null,
-        'expectedEndAt': null,
+        'status':
+            startNow ? MatchStatus.active.name : MatchStatus.scheduled.name,
+        'startedAt': startNow ? Timestamp.fromDate(now) : null,
+        'expectedEndAt': startNow
+            ? Timestamp.fromDate(
+                now.add(Duration(minutes: matchDurationMinutes)))
+            : null,
         'completedAt': null,
         'durationMinutes': matchDurationMinutes,
       });
 
-      batch.update(courtRef, {'nextMatchId': matchRef.id});
+      batch.update(courtRef,
+          startNow ? {'currentMatchId': matchRef.id} : {'nextMatchId': matchRef.id});
 
       // Update recent pairings for each player in the group.
       for (final player in scheduled.matchResult.players) {
@@ -97,12 +123,10 @@ class MatchRepository {
             .toList();
         final history = List<String>.from(recentPairings[player.id] ?? []);
         history.insertAll(0, others);
-        // Keep only the last N entries (trimmed by engine's decay window × group size).
         const keepEntries = 12;
         if (history.length > keepEntries) {
           history.removeRange(keepEntries, history.length);
         }
-        // Store on player document to survive app restarts.
         final playerRef = _db.collection('players').doc(player.id);
         batch.update(playerRef, {'recentOpponents': history});
       }
