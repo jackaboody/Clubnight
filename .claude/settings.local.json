@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Jacko\\\\Clubnight\" -Recurse -Force)",
+      "Bash(Select-Object FullName)",
+      "Bash(Sort-Object FullName)",
+      "Bash(Get-ChildItem -Recurse \"C:\\\\Users\\\\Jacko\\\\Clubnight\" -File)",
+      "Bash(firebase projects:list)",
+      "Bash(dart pub *)",
+      "Bash(flutterfire configure *)",
+      "Read(//c/Users/Jacko/AppData/Local/Pub/Cache/bin//**)",
+      "Read(//c/Users/Jacko/.pub-cache/**)",
+      "Bash(/c/Users/Jacko/AppData/Local/Pub/Cache/bin/flutterfire.bat configure *)",
+      "PowerShell(cd \"C:\\\\Users\\\\Jacko\\\\Clubnight\"; & \"$env:LOCALAPPDATA\\\\Pub\\\\Cache\\\\bin\\\\flutterfire.bat\" configure --project clubnight-ba39f --platforms android,ios,web,windows --android-package-name com.cltc.squashsocial --ios-bundle-id com.cltc.squashsocial --windows-app-id com.cltc.squashsocial --yes --out lib/firebase_options.dart 2>&1)",
+      "PowerShell(cd \"C:\\\\Users\\\\Jacko\\\\Clubnight\"; & \"$env:LOCALAPPDATA\\\\Pub\\\\Cache\\\\bin\\\\flutterfire.bat\" configure --project clubnight-ba39f --platforms android,ios,web --android-package-name com.cltc.squashsocial --ios-bundle-id com.cltc.squashsocial --yes --out lib/firebase_options.dart 2>&1)",
+      "Bash(\"/c/Flutter SDK/flutter/bin/flutter\" pub get)",
+      "Bash(\"/c/Flutter SDK/flutter/bin/flutter\" analyze lib/)",
+      "Bash(flutter analyze *)",
+      "Bash(flutter test *)",
+      "Bash(git init *)",
+      "Bash(git add *)"
+    ]
+  }
+}

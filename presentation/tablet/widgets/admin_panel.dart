@@ -1,0 +1,256 @@
+// presentation/tablet/widgets/admin_panel.dart
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:squash_social/domain/models/court.dart';
+import 'package:squash_social/presentation/providers/providers.dart';
+import 'package:squash_social/data/repositories/match_repository.dart';
+import 'package:squash_social/data/repositories/config_repository.dart';
+import 'package:squash_social/data/repositories/court_repository.dart';
+
+class AdminPanel extends ConsumerStatefulWidget {
+  const AdminPanel({super.key});
+
+  @override
+  ConsumerState<AdminPanel> createState() => _AdminPanelState();
+}
+
+class _AdminPanelState extends ConsumerState<AdminPanel> {
+  late TextEditingController _durationController;
+  bool _resetting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final config = ref.read(configProvider).valueOrNull;
+    _durationController = TextEditingController(
+      text: '${config?.matchDurationMinutes ?? 20}',
+    );
+  }
+
+  @override
+  void dispose() {
+    _durationController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final configAsync = ref.watch(configProvider);
+    final courtsAsync = ref.watch(courtsStreamProvider);
+    final configRepo = ConfigRepository();
+    final courtRepo = CourtRepository();
+
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.6,
+      maxChildSize: 0.9,
+      builder: (_, scrollController) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
+        child: ListView(
+          controller: scrollController,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.outline.withOpacity(0.4),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'Admin controls',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 24),
+
+            // Match duration
+            Text('Match duration (minutes)',
+                style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                IconButton.outlined(
+                  icon: const Icon(Icons.remove),
+                  onPressed: () {
+                    final current =
+                        int.tryParse(_durationController.text) ?? 20;
+                    if (current > 5) {
+                      final next = current - 5;
+                      _durationController.text = '$next';
+                      configRepo.setMatchDuration(next);
+                    }
+                  },
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 80,
+                  child: TextField(
+                    controller: _durationController,
+                    textAlign: TextAlign.center,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      contentPadding:
+                          EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                    ),
+                    onSubmitted: (v) {
+                      final parsed = int.tryParse(v);
+                      if (parsed != null && parsed >= 5) {
+                        configRepo.setMatchDuration(parsed);
+                      }
+                    },
+                  ),
+                ),
+                const SizedBox(width: 12),
+                IconButton.outlined(
+                  icon: const Icon(Icons.add),
+                  onPressed: () {
+                    final current =
+                        int.tryParse(_durationController.text) ?? 20;
+                    final next = current + 5;
+                    _durationController.text = '$next';
+                    configRepo.setMatchDuration(next);
+                  },
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 24),
+
+            // Fairness mode toggle
+            configAsync.when(
+              data: (config) => SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Fairness mode'),
+                subtitle: const Text(
+                    'Prioritise players with fewer matches played tonight'),
+                value: config.fairnessModeEnabled,
+                onChanged: (val) => configRepo.setFairnessMode(val),
+              ),
+              loading: () => const SizedBox.shrink(),
+              error: (_, __) => const SizedBox.shrink(),
+            ),
+
+            const SizedBox(height: 24),
+
+            // Court mode controls
+            Text('Court modes',
+                style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 8),
+            courtsAsync.when(
+              data: (courts) => Column(
+                children: courts
+                    .map((court) => _CourtModeRow(
+                          court: court,
+                          courtRepo: courtRepo,
+                        ))
+                    .toList(),
+              ),
+              loading: () => const CircularProgressIndicator(),
+              error: (_, __) => const Text('Error loading courts'),
+            ),
+
+            const SizedBox(height: 32),
+
+            // Reset evening
+            OutlinedButton.icon(
+              onPressed: _resetting ? null : () => _confirmReset(context, ref),
+              icon: _resetting
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.refresh, color: Colors.red),
+              label: const Text(
+                'Reset evening',
+                style: TextStyle(color: Colors.red),
+              ),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: Colors.red),
+                minimumSize: const Size(double.infinity, 48),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _confirmReset(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Reset evening?'),
+        content: const Text(
+          'This will clear all matches and reset every player\'s stats for tonight. This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Reset'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      setState(() => _resetting = true);
+      try {
+        final players = ref.read(playersStreamProvider).valueOrNull ?? [];
+        await ref
+            .read(matchRepositoryProvider)
+            .resetEvening(players.map((p) => p.id).toList());
+      } finally {
+        if (mounted) setState(() => _resetting = false);
+      }
+    }
+  }
+}
+
+class _CourtModeRow extends StatelessWidget {
+  final Court court;
+  final CourtRepository courtRepo;
+
+  const _CourtModeRow({required this.court, required this.courtRepo});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 80,
+            child: Text('Court ${court.number}',
+                style: const TextStyle(fontWeight: FontWeight.w500)),
+          ),
+          SegmentedButton<CourtMode>(
+            segments: const [
+              ButtonSegment(
+                  value: CourtMode.singles, label: Text('Singles')),
+              ButtonSegment(
+                  value: CourtMode.doubles, label: Text('Doubles')),
+              ButtonSegment(
+                  value: CourtMode.holding, label: Text('Hold')),
+            ],
+            selected: {court.mode},
+            onSelectionChanged: (selection) =>
+                courtRepo.setCourtMode(court.id, selection.first),
+          ),
+        ],
+      ),
+    );
+  }
+}
