@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:squash_social/core/seeder.dart';
 import 'package:squash_social/presentation/tablet/tablet_home_screen.dart';
 import 'package:squash_social/presentation/controllers/scheduling_controller.dart';
 import 'firebase_options.dart';
@@ -10,6 +11,7 @@ import 'firebase_options.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  await Seeder().seedIfNeeded();
   runApp(const ProviderScope(child: SquashSocialApp()));
 }
 
