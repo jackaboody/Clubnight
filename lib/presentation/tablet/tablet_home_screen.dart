@@ -7,7 +7,6 @@ import 'package:squash_social/presentation/tablet/widgets/court_card.dart';
 import 'package:squash_social/presentation/tablet/widgets/stats_bar.dart';
 import 'package:squash_social/presentation/tablet/widgets/admin_panel.dart';
 import 'package:squash_social/presentation/tablet/widgets/add_player_dialog.dart';
-import 'package:squash_social/presentation/controllers/scheduling_controller.dart';
 
 class TabletHomeScreen extends ConsumerWidget {
   const TabletHomeScreen({super.key});
@@ -74,10 +73,7 @@ class TabletHomeScreen extends ConsumerWidget {
   void _showAddPlayer(BuildContext context, WidgetRef ref) {
     showDialog(
       context: context,
-      builder: (_) => AddPlayerDialog(
-        onAdded: () =>
-            ref.read(schedulingControllerProvider.notifier).onPlayerJoined(),
-      ),
+      builder: (_) => AddPlayerDialog(onAdded: () {}),
     );
   }
 

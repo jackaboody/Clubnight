@@ -8,6 +8,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:squash_social/domain/models/court.dart';
 import 'package:squash_social/domain/models/match.dart';
+import 'package:squash_social/domain/models/player.dart';
 import 'package:squash_social/presentation/providers/providers.dart';
 
 // ---------------------------------------------------------------------------
@@ -33,6 +34,9 @@ class SchedulingController extends AsyncNotifier<SchedulingState> {
   // Snapshot of previously seen active match IDs so we can detect transitions.
   Set<String> _previouslyActiveMatchIds = {};
 
+  // Waiting player IDs from the last stream emission — used to detect new arrivals.
+  Set<String> _previousWaitingIds = {};
+
   @override
   Future<SchedulingState> build() async {
     // Load recent pairings from player documents once on startup.
@@ -40,9 +44,10 @@ class SchedulingController extends AsyncNotifier<SchedulingState> {
     for (final player in players) {
       _recentPairings[player.id] = player.recentOpponents;
     }
+    _previousWaitingIds =
+        players.where((p) => p.status == PlayerStatus.waiting).map((p) => p.id).toSet();
 
     // Listen for matches transitioning to 'completed' — that's our trigger.
-    // ref.listen is automatically cancelled when the notifier is disposed.
     ref.listen<AsyncValue<List<Match>>>(
       activeMatchesStreamProvider,
       (_, next) {
@@ -55,7 +60,27 @@ class SchedulingController extends AsyncNotifier<SchedulingState> {
       },
     );
 
+    // Listen for new waiting players. The stream callback fires AFTER Firestore
+    // delivers the update, so the player list is already current — no race condition.
+    ref.listen<AsyncValue<List<Player>>>(
+      playersStreamProvider,
+      (_, next) {
+        next.whenOrNull(data: _onPlayersChanged);
+      },
+    );
+
     return const SchedulingState();
+  }
+
+  void _onPlayersChanged(List<Player> players) {
+    final nowWaitingIds =
+        players.where((p) => p.status == PlayerStatus.waiting).map((p) => p.id).toSet();
+    final newArrivals = nowWaitingIds.difference(_previousWaitingIds);
+    _previousWaitingIds = nowWaitingIds;
+
+    if (newArrivals.isNotEmpty) {
+      onPlayerJoined();
+    }
   }
 
   void _onMatchesChanged(List<Match> matches) {

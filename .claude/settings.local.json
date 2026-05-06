@@ -18,7 +18,19 @@
       "Bash(flutter analyze *)",
       "Bash(flutter test *)",
       "Bash(git init *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git rm *)",
+      "Bash(git commit -m ' *)",
+      "Bash(gh repo *)",
+      "Bash(git remote *)",
+      "Bash(git push *)",
+      "Bash(git config *)",
+      "PowerShell(git config *)",
+      "Bash(git pull *)",
+      "Bash(git branch *)",
+      "Bash(flutter run *)",
+      "Bash(flutter create *)",
+      "Bash(del test\\\\widget_test.dart)"
     ]
   }
 }
