@@ -22,11 +22,15 @@ class SchedulingState {
 
 class SchedulingController extends AsyncNotifier<SchedulingState> {
   final Map<String, List<String>> _recentPairings = {};
+
+  // Track the previous state of each status bucket so we can detect
+  // the right kind of change in each stream callback.
   Set<String> _previousActiveMatchIds = {};
   Set<String> _previousWaitingIds = {};
+  Set<String> _previousPlayingIds = {};
 
-  // Serial task queue — all scheduling work is chained so nothing is dropped
-  // when two triggers fire simultaneously (e.g. match-end + players-returning).
+  // Serial task queue — all scheduling work runs in order so nothing is
+  // dropped when multiple triggers fire from the same Firestore batch.
   Future<void> _tail = Future.value();
 
   void _enqueue(Future<void> Function() work) {
@@ -41,32 +45,27 @@ class SchedulingController extends AsyncNotifier<SchedulingState> {
     for (final player in players) {
       _recentPairings[player.id] = player.recentOpponents;
     }
-    _previousActiveMatchIds = players
-        .where((p) => p.status == PlayerStatus.playing)
-        .map((p) => p.id)
-        .toSet();
     _previousWaitingIds =
         players.where((p) => p.status == PlayerStatus.waiting).map((p) => p.id).toSet();
+    _previousPlayingIds =
+        players.where((p) => p.status == PlayerStatus.playing).map((p) => p.id).toSet();
+    _previousActiveMatchIds = {};
 
     ref.listen<AsyncValue<List<Match>>>(
       activeMatchesStreamProvider,
-      (_, next) {
-        next.whenOrNull(data: _onMatchesChanged);
-      },
+      (_, next) => next.whenOrNull(data: _onMatchesChanged),
     );
 
     ref.listen<AsyncValue<List<Player>>>(
       playersStreamProvider,
-      (_, next) {
-        next.whenOrNull(data: _onPlayersChanged);
-      },
+      (_, next) => next.whenOrNull(data: _onPlayersChanged),
     );
 
     return const SchedulingState();
   }
 
   // ---------------------------------------------------------------------------
-  // Stream callbacks — enqueue work, never block each other
+  // Stream callbacks
   // ---------------------------------------------------------------------------
 
   void _onMatchesChanged(List<Match> matches) {
@@ -79,19 +78,29 @@ class SchedulingController extends AsyncNotifier<SchedulingState> {
     _previousActiveMatchIds = nowActiveIds;
 
     if (endedIds.isNotEmpty) {
-      _enqueue(() => _handleMatchesEnded(endedIds, matches));
+      // Pass endedIds only — _handleMatchesEnded reads fresh data when it runs
+      // so it always sees the current court/match state, not a stale snapshot.
+      _enqueue(() => _handleMatchesEnded(endedIds));
     }
   }
 
   void _onPlayersChanged(List<Player> players) {
     final nowWaitingIds =
         players.where((p) => p.status == PlayerStatus.waiting).map((p) => p.id).toSet();
-    final newArrivals = nowWaitingIds.difference(_previousWaitingIds);
-    _previousWaitingIds = nowWaitingIds;
+    final nowPlayingIds =
+        players.where((p) => p.status == PlayerStatus.playing).map((p) => p.id).toSet();
 
-    // Only trigger scheduling for genuinely new players, not for players
-    // returning to waiting after a match ends (those are handled by
-    // _handleMatchesEnded which is already queued ahead of this).
+    // Genuinely new arrivals: newly waiting AND not previously playing.
+    // Players returning from a match (playing → waiting) are excluded here;
+    // they are handled by _handleMatchesEnded which respects wait times and
+    // fairness. If we also triggered fill here they'd be re-scheduled immediately.
+    final newArrivals = nowWaitingIds
+        .difference(_previousWaitingIds)
+        .difference(_previousPlayingIds);
+
+    _previousWaitingIds = nowWaitingIds;
+    _previousPlayingIds = nowPlayingIds;
+
     if (newArrivals.isNotEmpty) {
       _enqueue(() => _tryFillEmptyCourts());
     }
@@ -101,12 +110,12 @@ class SchedulingController extends AsyncNotifier<SchedulingState> {
   // Work
   // ---------------------------------------------------------------------------
 
-  Future<void> _handleMatchesEnded(
-    Set<String> endedMatchIds,
-    List<Match> currentMatches,
-  ) async {
+  Future<void> _handleMatchesEnded(Set<String> endedMatchIds) async {
+    // Always read fresh data — stale snapshots from the stream callback would
+    // miss any nextMatches created by items earlier in the queue.
     final courts = await ref.read(courtsStreamProvider.future);
     final players = await ref.read(playersStreamProvider.future);
+    final matches = await ref.read(activeMatchesStreamProvider.future);
     final config = await ref.read(configProvider.future);
     final scheduler = ref.read(courtSchedulerProvider);
     final repo = ref.read(matchRepositoryProvider);
@@ -116,14 +125,14 @@ class SchedulingController extends AsyncNotifier<SchedulingState> {
       try {
         court = courts.firstWhere((c) => c.currentMatchId == endedId);
       } catch (_) {
-        continue;
+        continue; // Court already advanced by a concurrent trigger.
       }
 
       final output = scheduler.onMatchEnded(
         endedCourt: court,
         allCourts: courts,
         allPlayers: players,
-        activeMatches: currentMatches,
+        activeMatches: matches,
         config: config,
         recentPairings: _recentPairings,
       );
@@ -183,7 +192,6 @@ class SchedulingController extends AsyncNotifier<SchedulingState> {
     }
   }
 
-  /// Public entry point kept for external callers (e.g. after bulk changes).
   void onPlayerJoined() => _enqueue(() => _tryFillEmptyCourts());
 }
 

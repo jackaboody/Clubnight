@@ -364,9 +364,9 @@ class _PlayerRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          // Doubles preference toggle
+          // Doubles opt-in toggle
           Tooltip(
-            message: player.prefersDoubles ? 'Prefers doubles' : 'Prefers singles',
+            message: player.prefersDoubles ? 'Can play doubles (tap to revert to singles only)' : 'Singles only (tap to allow doubles)',
             child: IconButton(
               icon: Icon(
                 player.prefersDoubles ? Icons.people : Icons.person,

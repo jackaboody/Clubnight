@@ -69,7 +69,8 @@ class _AddPlayerDialogState extends State<AddPlayerDialog> {
             const SizedBox(height: 12),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text('Prefers doubles'),
+              title: const Text('Can play doubles'),
+              subtitle: const Text('Will be considered for doubles matches'),
               value: _prefersDoubles,
               onChanged: (v) => setState(() => _prefersDoubles = v),
             ),
