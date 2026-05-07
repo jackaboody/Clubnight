@@ -33,7 +33,7 @@ class _AdminPanelState extends ConsumerState<AdminPanel> {
       ..addListener(() {
         if (!_durationFocus.hasFocus) {
           final parsed = int.tryParse(_durationController.text);
-          if (parsed != null && parsed >= 5) {
+          if (parsed != null && parsed >= 0) {
             ConfigRepository().setMatchDuration(parsed);
           }
         }
@@ -95,9 +95,9 @@ class _AdminPanelState extends ConsumerState<AdminPanel> {
                   icon: const Icon(Icons.remove),
                   onPressed: () {
                     final current =
-                        int.tryParse(_durationController.text) ?? 20;
-                    if (current > 5) {
-                      final next = current - 5;
+                        int.tryParse(_durationController.text) ?? 15;
+                    if (current > 0) {
+                      final next = (current - 5).clamp(0, 9999);
                       _durationController.text = '$next';
                       configRepo.setMatchDuration(next);
                     }
@@ -119,7 +119,7 @@ class _AdminPanelState extends ConsumerState<AdminPanel> {
                     ),
                     onSubmitted: (v) {
                       final parsed = int.tryParse(v);
-                      if (parsed != null && parsed >= 5) {
+                      if (parsed != null && parsed >= 0) {
                         configRepo.setMatchDuration(parsed);
                       }
                     },
@@ -364,6 +364,23 @@ class _PlayerRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
+          // Doubles preference toggle
+          Tooltip(
+            message: player.prefersDoubles ? 'Prefers doubles' : 'Prefers singles',
+            child: IconButton(
+              icon: Icon(
+                player.prefersDoubles ? Icons.people : Icons.person,
+                size: 20,
+                color: player.prefersDoubles
+                    ? Colors.purple
+                    : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4),
+              ),
+              onPressed: () => playerRepo.updateDoublesPreference(
+                player.id,
+                !player.prefersDoubles,
+              ),
+            ),
+          ),
           // Rest / Activate toggle (disabled while playing)
           Tooltip(
             message: isResting ? 'Set active' : 'Set resting',
