@@ -46,7 +46,6 @@ class MatchRepository {
     required Map<String, List<String>> recentPairings,
   }) async {
     final batch = _db.batch();
-    final now = DateTime.now();
 
     // Courts whose nextMatch is being promoted → will have a currentMatch after
     // this batch commits.
@@ -61,24 +60,18 @@ class MatchRepository {
         .map((t) => t.court.id)
         .toSet();
 
-    // 1. Activate pending next matches on courts that just freed up.
+    // 1. Promote nextMatch → currentMatch (stays 'scheduled' until organiser
+    //    presses Start, so the timer only runs once players are on court).
     for (final target in output.courtsToActivateNextMatch) {
       final court = target.court;
       final courtRef = _db.collection('courts').doc(court.id);
       if (court.nextMatchId != null) {
-        // Promote nextMatch → currentMatch.
         batch.update(courtRef, {
           'currentMatchId': court.nextMatchId,
           'nextMatchId': null,
         });
-        batch.update(_db.collection('matches').doc(court.nextMatchId), {
-          'status': MatchStatus.active.name,
-          'startedAt': Timestamp.fromDate(now),
-          'expectedEndAt': Timestamp.fromDate(
-            now.add(Duration(minutes: matchDurationMinutes)),
-          ),
-        });
-        // Set promoted players to 'playing' and point them at the new match.
+        // Mark players as 'playing' so the scheduler won't re-assign them,
+        // but leave the match as 'scheduled' — timer starts on Start button.
         for (final playerId in target.playerIds) {
           batch.update(_db.collection('players').doc(playerId), {
             'status': PlayerStatus.playing.name,
@@ -86,21 +79,20 @@ class MatchRepository {
           });
         }
       } else {
-        // Match ended with nothing queued — clear the court so it shows free.
+        // Match ended with nothing queued — clear the court.
         batch.update(courtRef, {'currentMatchId': null});
       }
     }
 
-    // 2. Create new match documents and assign to courts.
+    // 2. Create new match documents. Matches placed in the currentMatch slot
+    //    (court was free) are still 'scheduled' — Start button activates them.
     for (final scheduled in output.newNextMatches) {
       final matchRef = _db.collection('matches').doc();
       final courtRef = _db.collection('courts').doc(scheduled.court.id);
 
-      // Start immediately if the court has no current match, accounting for
-      // courts being freed or activated within this same batch.
       final courtWillBeFree = scheduled.court.currentMatchId == null ||
           freedCourtIds.contains(scheduled.court.id);
-      final startNow =
+      final goToCurrentSlot =
           courtWillBeFree && !activatingCourtIds.contains(scheduled.court.id);
 
       batch.set(matchRef, {
@@ -109,19 +101,18 @@ class MatchRepository {
             ? 'doubles'
             : 'singles',
         'courtId': scheduled.court.id,
-        'status':
-            startNow ? MatchStatus.active.name : MatchStatus.scheduled.name,
-        'startedAt': startNow ? Timestamp.fromDate(now) : null,
-        'expectedEndAt': startNow
-            ? Timestamp.fromDate(
-                now.add(Duration(minutes: matchDurationMinutes)))
-            : null,
+        'status': MatchStatus.scheduled.name,
+        'startedAt': null,
+        'expectedEndAt': null,
         'completedAt': null,
         'durationMinutes': matchDurationMinutes,
       });
 
-      batch.update(courtRef,
-          startNow ? {'currentMatchId': matchRef.id} : {'nextMatchId': matchRef.id});
+      batch.update(
+          courtRef,
+          goToCurrentSlot
+              ? {'currentMatchId': matchRef.id}
+              : {'nextMatchId': matchRef.id});
 
       for (final player in scheduled.matchResult.players) {
         final others = scheduled.matchResult.players
@@ -136,13 +127,30 @@ class MatchRepository {
         }
         batch.update(_db.collection('players').doc(player.id), {
           'recentOpponents': history,
-          if (startNow) 'status': PlayerStatus.playing.name,
-          if (startNow) 'currentMatchId': matchRef.id,
+          if (goToCurrentSlot) 'status': PlayerStatus.playing.name,
+          if (goToCurrentSlot) 'currentMatchId': matchRef.id,
         });
       }
     }
 
     await batch.commit();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Write: start a match (organiser taps Start when players are on court)
+  // ---------------------------------------------------------------------------
+
+  Future<void> startMatch({
+    required String matchId,
+    required int durationMinutes,
+  }) {
+    final now = DateTime.now();
+    return _db.collection('matches').doc(matchId).update({
+      'status': MatchStatus.active.name,
+      'startedAt': Timestamp.fromDate(now),
+      'expectedEndAt':
+          Timestamp.fromDate(now.add(Duration(minutes: durationMinutes))),
+    });
   }
 
   // ---------------------------------------------------------------------------

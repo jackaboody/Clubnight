@@ -51,12 +51,15 @@ class _CourtCardState extends ConsumerState<CourtCard>
 
     final isHolding = court.mode == CourtMode.holding;
     final hasActive = court.currentMatchId != null;
+    final currentMatch = currentMatchAsync?.valueOrNull;
+    final matchIsLive = currentMatch?.status == MatchStatus.active;
+    final matchIsReady = currentMatch?.status == MatchStatus.scheduled;
 
     return AnimatedBuilder(
       animation: _pulseAnimation,
       builder: (context, child) {
         return Transform.scale(
-          scale: hasActive ? _pulseAnimation.value : 1.0,
+          scale: matchIsLive ? _pulseAnimation.value : 1.0,
           child: child,
         );
       },
@@ -80,7 +83,7 @@ class _CourtCardState extends ConsumerState<CourtCard>
                 const _HoldingBadge(),
               ] else ...[
                 _MatchSection(
-                  label: 'Now playing',
+                  label: matchIsLive ? 'Now playing' : 'Ready to start',
                   matchAsync: currentMatchAsync,
                   allPlayers: allPlayers,
                   isActive: true,
@@ -95,10 +98,12 @@ class _CourtCardState extends ConsumerState<CourtCard>
                   court: court,
                 ),
                 const SizedBox(height: 16),
-                if (hasActive)
+                if (matchIsReady)
+                  _StartMatchButton(match: currentMatch!)
+                else if (matchIsLive)
                   _EndNowButton(
                     court: court,
-                    match: currentMatchAsync?.valueOrNull,
+                    match: currentMatch,
                   ),
               ],
             ],
@@ -112,10 +117,16 @@ class _CourtCardState extends ConsumerState<CourtCard>
     if (court.mode == CourtMode.holding) {
       return Theme.of(context).colorScheme.outline.withValues(alpha: 0.3);
     }
-    if (court.currentMatchId != null) {
+    final currentMatch = court.currentMatchId != null
+        ? ref.watch(matchByIdProvider(court.currentMatchId!)).valueOrNull
+        : null;
+    if (currentMatch?.status == MatchStatus.active) {
       return court.mode == CourtMode.doubles
           ? Theme.of(context).colorScheme.secondary
           : Theme.of(context).colorScheme.primary;
+    }
+    if (currentMatch?.status == MatchStatus.scheduled) {
+      return Colors.green.withValues(alpha: 0.6);
     }
     return Theme.of(context).colorScheme.outline.withValues(alpha: 0.5);
   }
@@ -494,6 +505,29 @@ class _HoldingBadge extends StatelessWidget {
 
 // ---------------------------------------------------------------------------
 
+class _StartMatchButton extends ConsumerWidget {
+  final Match match;
+  const _StartMatchButton({required this.match});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return SizedBox(
+      width: double.infinity,
+      child: FilledButton.icon(
+        onPressed: () => ref.read(matchRepositoryProvider).startMatch(
+              matchId: match.id,
+              durationMinutes: match.durationMinutes,
+            ),
+        icon: const Icon(Icons.play_arrow, size: 18),
+        label: const Text('Start match'),
+        style: FilledButton.styleFrom(backgroundColor: Colors.green),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+
 class _EndNowButton extends ConsumerWidget {
   final Court court;
   final Match? match;
@@ -523,7 +557,7 @@ class _EndNowButton extends ConsumerWidget {
       builder: (_) => AlertDialog(
         title: const Text('End Match?'),
         content: const Text(
-          'This will immediately end the current match and trigger the next one.',
+          'This will end the current match. Press Start on the next match when players are ready.',
         ),
         actions: [
           TextButton(
