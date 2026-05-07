@@ -111,8 +111,6 @@ class SchedulingController extends AsyncNotifier<SchedulingState> {
   // ---------------------------------------------------------------------------
 
   Future<void> _handleMatchesEnded(Set<String> endedMatchIds) async {
-    // Always read fresh data — stale snapshots from the stream callback would
-    // miss any nextMatches created by items earlier in the queue.
     final courts = await ref.read(courtsStreamProvider.future);
     final players = await ref.read(playersStreamProvider.future);
     final matches = await ref.read(activeMatchesStreamProvider.future);
@@ -120,32 +118,39 @@ class SchedulingController extends AsyncNotifier<SchedulingState> {
     final scheduler = ref.read(courtSchedulerProvider);
     final repo = ref.read(matchRepositoryProvider);
 
+    // Collect ALL ended courts first — one consistent snapshot, one batch.
+    // Processing them in a loop with separate commits caused the second court
+    // to read stale data and overwrite the nextMatch the first commit created.
+    final endedCourts = <Court>[];
     for (final endedId in endedMatchIds) {
-      final Court? court;
       try {
-        court = courts.firstWhere((c) => c.currentMatchId == endedId);
+        endedCourts.add(courts.firstWhere((c) => c.currentMatchId == endedId));
       } catch (_) {
-        continue; // Court already advanced by a concurrent trigger.
+        // Court already advanced by a concurrent trigger — skip.
       }
-
-      final output = scheduler.onMatchEnded(
-        endedCourt: court,
-        allCourts: courts,
-        allPlayers: players,
-        activeMatches: matches,
-        config: config,
-        recentPairings: _recentPairings,
-      );
-
-      await repo.applyScheduleOutput(
-        output: output,
-        matchDurationMinutes: config.matchDurationMinutes,
-        recentPairings: _recentPairings,
-      );
-
-      _updatePairingsCache(output.newNextMatches);
     }
 
+    if (endedCourts.isEmpty) {
+      state = const AsyncValue.data(SchedulingState());
+      return;
+    }
+
+    final output = scheduler.onMatchesEnded(
+      endedCourts: endedCourts,
+      allCourts: courts,
+      allPlayers: players,
+      activeMatches: matches,
+      config: config,
+      recentPairings: _recentPairings,
+    );
+
+    await repo.applyScheduleOutput(
+      output: output,
+      matchDurationMinutes: config.matchDurationMinutes,
+      recentPairings: _recentPairings,
+    );
+
+    _updatePairingsCache(output.newNextMatches);
     state = const AsyncValue.data(SchedulingState());
   }
 

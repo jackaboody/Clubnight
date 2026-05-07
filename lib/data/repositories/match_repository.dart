@@ -78,10 +78,11 @@ class MatchRepository {
             now.add(Duration(minutes: matchDurationMinutes)),
           ),
         });
-        // Set promoted players to 'playing'.
+        // Set promoted players to 'playing' and point them at the new match.
         for (final playerId in target.playerIds) {
           batch.update(_db.collection('players').doc(playerId), {
             'status': PlayerStatus.playing.name,
+            'currentMatchId': court.nextMatchId,
           });
         }
       } else {
@@ -135,8 +136,8 @@ class MatchRepository {
         }
         batch.update(_db.collection('players').doc(player.id), {
           'recentOpponents': history,
-          // If the match starts immediately, flip the player to 'playing'.
           if (startNow) 'status': PlayerStatus.playing.name,
+          if (startNow) 'currentMatchId': matchRef.id,
         });
       }
     }

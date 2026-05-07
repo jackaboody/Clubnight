@@ -46,8 +46,12 @@ class CourtScheduler {
 
   const CourtScheduler({required this.engine});
 
-  ScheduleOutput onMatchEnded({
-    required Court endedCourt,
+  /// Handles one or more matches ending in the same Firestore snapshot.
+  /// All ended courts are processed in a single consistent pass so no court
+  /// can be double-scheduled or have its nextMatch overwritten by a later
+  /// iteration reading stale data.
+  ScheduleOutput onMatchesEnded({
+    required List<Court> endedCourts,
     required List<Court> allCourts,
     required List<Player> allPlayers,
     required List<Match> activeMatches,
@@ -55,6 +59,7 @@ class CourtScheduler {
     required Map<String, List<String>> recentPairings,
   }) {
     final committedPlayerIds = _committedPlayerIds(allCourts, activeMatches);
+    final endedCourtIds = endedCourts.map((c) => c.id).toSet();
 
     final waitingPlayers = allPlayers
         .where((p) =>
@@ -67,19 +72,18 @@ class CourtScheduler {
             m.status == MatchStatus.active && m.type == MatchType.doubles)
         .length;
 
-    final courtsNeedingNext = allCourts
-        .where((c) =>
-            c.mode != CourtMode.holding &&
-            c.nextMatchId == null &&
-            c.id != endedCourt.id)
-        .toList()
-      ..add(endedCourt);
+    // Ended courts first (priority — their players just freed up), then any
+    // other courts that still have an empty next-match slot.
+    final courtsNeedingNext = [
+      ...endedCourts,
+      ...allCourts.where((c) =>
+          c.mode != CourtMode.holding &&
+          c.nextMatchId == null &&
+          !endedCourtIds.contains(c.id)),
+    ];
 
     final newNextMatches = <ScheduledMatch>[];
     final usedPlayerIds = <String>{};
-
-    courtsNeedingNext.sort((a, b) =>
-        a.id == endedCourt.id ? -1 : (b.id == endedCourt.id ? 1 : 0));
 
     for (final court in courtsNeedingNext) {
       final availablePlayers = waitingPlayers
@@ -102,25 +106,20 @@ class CourtScheduler {
       }
     }
 
-    // Build activation targets — include player IDs from the queued next match
-    // so the repository can update player statuses atomically.
-    final activationTargets = <ActivationTarget>[];
-    if (endedCourt.nextMatchId != null) {
-      final nextMatch = activeMatches.firstWhere(
-        (m) => m.id == endedCourt.nextMatchId,
-        orElse: () => throw StateError(
-            'nextMatch ${endedCourt.nextMatchId} not found in activeMatches'),
-      );
-      activationTargets.add(ActivationTarget(
-        court: endedCourt,
-        playerIds: nextMatch.playerIds,
-      ));
-    } else {
-      activationTargets.add(ActivationTarget(
-        court: endedCourt,
-        playerIds: const [],
-      ));
-    }
+    // Build one activation target per ended court.
+    final activationTargets = endedCourts.map((endedCourt) {
+      if (endedCourt.nextMatchId != null) {
+        try {
+          final nextMatch =
+              activeMatches.firstWhere((m) => m.id == endedCourt.nextMatchId);
+          return ActivationTarget(
+              court: endedCourt, playerIds: nextMatch.playerIds);
+        } catch (_) {
+          // nextMatch document missing — treat as no queued match.
+        }
+      }
+      return ActivationTarget(court: endedCourt, playerIds: const []);
+    }).toList();
 
     return ScheduleOutput(
       newNextMatches: newNextMatches,
