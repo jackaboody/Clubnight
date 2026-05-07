@@ -169,19 +169,16 @@ class MatchRepository {
   // Write: reset the entire evening
   // ---------------------------------------------------------------------------
 
-  Future<void> resetEvening(List<String> playerIds) async {
+  Future<void> resetEvening() async {
     final batch = _db.batch();
 
-    // Delete all non-completed matches.
-    final activeDocs = await _db
-        .collection('matches')
-        .where('status', whereIn: ['active', 'scheduled'])
-        .get();
-    for (final doc in activeDocs.docs) {
+    // Delete all matches.
+    final matchDocs = await _db.collection('matches').get();
+    for (final doc in matchDocs.docs) {
       batch.delete(doc.reference);
     }
 
-    // Reset courts.
+    // Clear courts.
     final courts = await _db.collection('courts').get();
     for (final doc in courts.docs) {
       batch.update(doc.reference, {
@@ -190,15 +187,10 @@ class MatchRepository {
       });
     }
 
-    // Reset all players.
-    for (final playerId in playerIds) {
-      batch.update(_db.collection('players').doc(playerId), {
-        'status': PlayerStatus.waiting.name,
-        'matchesPlayed': 0,
-        'lastPlayedAt': null,
-        'currentMatchId': null,
-        'recentOpponents': [],
-      });
+    // Delete all players.
+    final players = await _db.collection('players').get();
+    for (final doc in players.docs) {
+      batch.delete(doc.reference);
     }
 
     await batch.commit();

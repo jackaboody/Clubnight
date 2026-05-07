@@ -37,7 +37,7 @@ class Seeder {
   }
 
   Future<void> _seedConfig() async {
-    final ref = _db.collection('config').doc('app');
+    final ref = _db.collection('config').doc('settings');
     final snapshot = await ref.get();
     if (snapshot.exists) return; // already seeded
 
