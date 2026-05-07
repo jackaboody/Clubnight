@@ -19,6 +19,7 @@ class AdminPanel extends ConsumerStatefulWidget {
 
 class _AdminPanelState extends ConsumerState<AdminPanel> {
   late TextEditingController _durationController;
+  late FocusNode _durationFocus;
   bool _resetting = false;
 
   @override
@@ -26,13 +27,23 @@ class _AdminPanelState extends ConsumerState<AdminPanel> {
     super.initState();
     final config = ref.read(configProvider).valueOrNull;
     _durationController = TextEditingController(
-      text: '${config?.matchDurationMinutes ?? 20}',
+      text: '${config?.matchDurationMinutes ?? 15}',
     );
+    _durationFocus = FocusNode()
+      ..addListener(() {
+        if (!_durationFocus.hasFocus) {
+          final parsed = int.tryParse(_durationController.text);
+          if (parsed != null && parsed >= 5) {
+            ConfigRepository().setMatchDuration(parsed);
+          }
+        }
+      });
   }
 
   @override
   void dispose() {
     _durationController.dispose();
+    _durationFocus.dispose();
     super.dispose();
   }
 
@@ -97,6 +108,7 @@ class _AdminPanelState extends ConsumerState<AdminPanel> {
                   width: 80,
                   child: TextField(
                     controller: _durationController,
+                    focusNode: _durationFocus,
                     textAlign: TextAlign.center,
                     keyboardType: TextInputType.number,
                     inputFormatters: [FilteringTextInputFormatter.digitsOnly],

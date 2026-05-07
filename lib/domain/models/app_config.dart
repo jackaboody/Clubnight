@@ -8,7 +8,7 @@ class AppConfig {
   final bool fairnessModeEnabled;
 
   const AppConfig({
-    this.matchDurationMinutes = 20,
+    this.matchDurationMinutes = 15,
     this.maxDoubleCourts = 2,
     this.fairnessModeEnabled = true,
   });

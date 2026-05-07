@@ -51,18 +51,19 @@ class MatchRepository {
     // Courts whose nextMatch is being promoted → will have a currentMatch after
     // this batch commits.
     final activatingCourtIds = output.courtsToActivateNextMatch
-        .where((c) => c.nextMatchId != null)
-        .map((c) => c.id)
+        .where((t) => t.court.nextMatchId != null)
+        .map((t) => t.court.id)
         .toSet();
 
     // Courts whose match ended with no queued nextMatch → being freed.
     final freedCourtIds = output.courtsToActivateNextMatch
-        .where((c) => c.nextMatchId == null)
-        .map((c) => c.id)
+        .where((t) => t.court.nextMatchId == null)
+        .map((t) => t.court.id)
         .toSet();
 
     // 1. Activate pending next matches on courts that just freed up.
-    for (final court in output.courtsToActivateNextMatch) {
+    for (final target in output.courtsToActivateNextMatch) {
+      final court = target.court;
       final courtRef = _db.collection('courts').doc(court.id);
       if (court.nextMatchId != null) {
         // Promote nextMatch → currentMatch.
@@ -77,6 +78,12 @@ class MatchRepository {
             now.add(Duration(minutes: matchDurationMinutes)),
           ),
         });
+        // Set promoted players to 'playing'.
+        for (final playerId in target.playerIds) {
+          batch.update(_db.collection('players').doc(playerId), {
+            'status': PlayerStatus.playing.name,
+          });
+        }
       } else {
         // Match ended with nothing queued — clear the court so it shows free.
         batch.update(courtRef, {'currentMatchId': null});
@@ -115,7 +122,6 @@ class MatchRepository {
       batch.update(courtRef,
           startNow ? {'currentMatchId': matchRef.id} : {'nextMatchId': matchRef.id});
 
-      // Update recent pairings for each player in the group.
       for (final player in scheduled.matchResult.players) {
         final others = scheduled.matchResult.players
             .where((p) => p.id != player.id)
@@ -127,8 +133,11 @@ class MatchRepository {
         if (history.length > keepEntries) {
           history.removeRange(keepEntries, history.length);
         }
-        final playerRef = _db.collection('players').doc(player.id);
-        batch.update(playerRef, {'recentOpponents': history});
+        batch.update(_db.collection('players').doc(player.id), {
+          'recentOpponents': history,
+          // If the match starts immediately, flip the player to 'playing'.
+          if (startNow) 'status': PlayerStatus.playing.name,
+        });
       }
     }
 

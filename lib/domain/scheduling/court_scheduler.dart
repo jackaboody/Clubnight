@@ -1,8 +1,4 @@
 // lib/domain/scheduling/court_scheduler.dart
-//
-// Orchestrates matchmaking across all courts.
-// Pure Dart — receives current state as value objects, returns actions to apply.
-// The repository layer executes the Firestore writes.
 
 import 'package:squash_social/domain/models/court.dart';
 import 'package:squash_social/domain/models/match.dart';
@@ -11,7 +7,7 @@ import 'package:squash_social/domain/models/app_config.dart';
 import 'package:squash_social/domain/matchmaking/matchmaking_engine.dart';
 
 // ---------------------------------------------------------------------------
-// Schedule result — a batch of write operations for the repository to execute
+// Schedule result
 // ---------------------------------------------------------------------------
 
 class ScheduledMatch {
@@ -21,12 +17,19 @@ class ScheduledMatch {
   const ScheduledMatch({required this.court, required this.matchResult});
 }
 
-class ScheduleOutput {
-  /// Matches to be written to Firestore and assigned as `nextMatch` on courts.
-  final List<ScheduledMatch> newNextMatches;
+/// A court whose queued nextMatch should be promoted to currentMatch.
+/// Carries the player IDs so the repository can flip their status to
+/// 'playing' in the same atomic batch, without needing an extra read.
+class ActivationTarget {
+  final Court court;
+  final List<String> playerIds;
 
-  /// Courts whose nextMatch should be promoted to currentMatch.
-  final List<Court> courtsToActivateNextMatch;
+  const ActivationTarget({required this.court, required this.playerIds});
+}
+
+class ScheduleOutput {
+  final List<ScheduledMatch> newNextMatches;
+  final List<ActivationTarget> courtsToActivateNextMatch;
 
   const ScheduleOutput({
     required this.newNextMatches,
@@ -43,15 +46,6 @@ class CourtScheduler {
 
   const CourtScheduler({required this.engine});
 
-  // ---------------------------------------------------------------------------
-  // Main entry points
-  // ---------------------------------------------------------------------------
-
-  /// Called when any court's match ends naturally or via "End Now".
-  /// Returns the set of Firestore writes needed to:
-  ///   1. Promote the nextMatch to currentMatch on the triggering court.
-  ///   2. Generate a new nextMatch for that court.
-  ///   3. Optionally generate nextMatches for other courts that lack them.
   ScheduleOutput onMatchEnded({
     required Court endedCourt,
     required List<Court> allCourts,
@@ -60,8 +54,6 @@ class CourtScheduler {
     required AppConfig config,
     required Map<String, List<String>> recentPairings,
   }) {
-    // Players currently in scheduled-but-not-yet-started next matches are
-    // committed and should not be re-allocated.
     final committedPlayerIds = _committedPlayerIds(allCourts, activeMatches);
 
     final waitingPlayers = allPlayers
@@ -71,10 +63,10 @@ class CourtScheduler {
         .toList();
 
     final activeDoubleCourts = activeMatches
-        .where((m) => m.status == MatchStatus.active && m.type == MatchType.doubles)
+        .where((m) =>
+            m.status == MatchStatus.active && m.type == MatchType.doubles)
         .length;
 
-    // Courts that need a nextMatch generated (including the just-freed court).
     final courtsNeedingNext = allCourts
         .where((c) =>
             c.mode != CourtMode.holding &&
@@ -86,7 +78,6 @@ class CourtScheduler {
     final newNextMatches = <ScheduledMatch>[];
     final usedPlayerIds = <String>{};
 
-    // Sort courts: freed court first so it gets priority allocation.
     courtsNeedingNext.sort((a, b) =>
         a.id == endedCourt.id ? -1 : (b.id == endedCourt.id ? 1 : 0));
 
@@ -111,14 +102,32 @@ class CourtScheduler {
       }
     }
 
+    // Build activation targets — include player IDs from the queued next match
+    // so the repository can update player statuses atomically.
+    final activationTargets = <ActivationTarget>[];
+    if (endedCourt.nextMatchId != null) {
+      final nextMatch = activeMatches.firstWhere(
+        (m) => m.id == endedCourt.nextMatchId,
+        orElse: () => throw StateError(
+            'nextMatch ${endedCourt.nextMatchId} not found in activeMatches'),
+      );
+      activationTargets.add(ActivationTarget(
+        court: endedCourt,
+        playerIds: nextMatch.playerIds,
+      ));
+    } else {
+      activationTargets.add(ActivationTarget(
+        court: endedCourt,
+        playerIds: const [],
+      ));
+    }
+
     return ScheduleOutput(
       newNextMatches: newNextMatches,
-      courtsToActivateNextMatch: [endedCourt],
+      courtsToActivateNextMatch: activationTargets,
     );
   }
 
-  /// Called when a new player joins (status becomes 'waiting').
-  /// Only generates nextMatches for courts that don't have one yet.
   ScheduleOutput onPlayerAdded({
     required List<Court> allCourts,
     required List<Player> allPlayers,
@@ -135,7 +144,8 @@ class CourtScheduler {
         .toList();
 
     final activeDoubleCourts = activeMatches
-        .where((m) => m.status == MatchStatus.active && m.type == MatchType.doubles)
+        .where((m) =>
+            m.status == MatchStatus.active && m.type == MatchType.doubles)
         .length;
 
     final courtsNeedingNext = allCourts
@@ -168,29 +178,36 @@ class CourtScheduler {
 
     return ScheduleOutput(
       newNextMatches: newNextMatches,
-      courtsToActivateNextMatch: [],
+      courtsToActivateNextMatch: const [],
     );
   }
 
   // ---------------------------------------------------------------------------
-  // Helpers
-  // ---------------------------------------------------------------------------
 
-  /// Players who are already locked into a scheduled nextMatch should not be
-  /// re-allocated by the engine.
+  /// Players who must not be re-allocated in this scheduling round:
+  /// - Players already in an active match (playing right now).
+  /// - Players locked into a scheduled nextMatch on a court.
   Set<String> _committedPlayerIds(
     List<Court> allCourts,
     List<Match> allMatches,
   ) {
+    // Active match players.
+    final activePlayers = allMatches
+        .where((m) => m.status == MatchStatus.active)
+        .expand((m) => m.playerIds)
+        .toSet();
+
+    // Scheduled nextMatch players.
     final nextMatchIds = allCourts
         .where((c) => c.nextMatchId != null)
         .map((c) => c.nextMatchId!)
         .toSet();
-
-    return allMatches
+    final scheduledPlayers = allMatches
         .where((m) =>
             nextMatchIds.contains(m.id) && m.status == MatchStatus.scheduled)
         .expand((m) => m.playerIds)
         .toSet();
+
+    return {...activePlayers, ...scheduledPlayers};
   }
 }
