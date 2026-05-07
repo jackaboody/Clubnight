@@ -339,16 +339,17 @@ class _PlayerChip extends StatelessWidget {
 
 // ---------------------------------------------------------------------------
 
-class _MatchTimer extends StatefulWidget {
+class _MatchTimer extends ConsumerStatefulWidget {
   final Match match;
   const _MatchTimer({required this.match});
 
   @override
-  State<_MatchTimer> createState() => _MatchTimerState();
+  ConsumerState<_MatchTimer> createState() => _MatchTimerState();
 }
 
-class _MatchTimerState extends State<_MatchTimer> {
+class _MatchTimerState extends ConsumerState<_MatchTimer> {
   late final Stream<Duration?> _timerStream;
+  bool _autoEndTriggered = false;
 
   @override
   void initState() {
@@ -359,6 +360,20 @@ class _MatchTimerState extends State<_MatchTimer> {
     );
   }
 
+  void _maybeAutoEnd(Duration? remaining) {
+    if (_autoEndTriggered) return;
+    if (remaining != Duration.zero) return;
+    if (widget.match.status != MatchStatus.active) return;
+    _autoEndTriggered = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ref.read(matchRepositoryProvider).endMatch(
+            matchId: widget.match.id,
+            playerIds: widget.match.playerIds,
+          );
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<Duration?>(
@@ -367,6 +382,8 @@ class _MatchTimerState extends State<_MatchTimer> {
       builder: (context, snap) {
         final remaining = snap.data;
         if (remaining == null) return const SizedBox.shrink();
+
+        _maybeAutoEnd(remaining);
 
         final isOvertime = remaining == Duration.zero;
         final minutes = remaining.inMinutes;
