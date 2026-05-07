@@ -360,6 +360,14 @@ class _MatchTimerState extends ConsumerState<_MatchTimer> {
     );
   }
 
+  @override
+  void didUpdateWidget(_MatchTimer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.match.id != widget.match.id) {
+      _autoEndTriggered = false;
+    }
+  }
+
   void _maybeAutoEnd(Duration? remaining) {
     if (_autoEndTriggered) return;
     if (remaining != Duration.zero) return;
