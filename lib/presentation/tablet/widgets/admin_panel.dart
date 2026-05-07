@@ -8,6 +8,7 @@ import 'package:squash_social/domain/models/player.dart';
 import 'package:squash_social/presentation/providers/providers.dart';
 import 'package:squash_social/data/repositories/config_repository.dart';
 import 'package:squash_social/data/repositories/court_repository.dart';
+import 'package:squash_social/data/repositories/match_repository.dart';
 import 'package:squash_social/data/repositories/player_repository.dart';
 
 class AdminPanel extends ConsumerStatefulWidget {
@@ -55,6 +56,7 @@ class _AdminPanelState extends ConsumerState<AdminPanel> {
     final configRepo = ConfigRepository();
     final courtRepo = CourtRepository();
     final playerRepo = PlayerRepository();
+    final matchRepo = ref.read(matchRepositoryProvider);
 
     return DraggableScrollableSheet(
       expand: false,
@@ -199,6 +201,7 @@ class _AdminPanelState extends ConsumerState<AdminPanel> {
                           .map((p) => _PlayerRow(
                                 player: p,
                                 playerRepo: playerRepo,
+                                matchRepo: matchRepo,
                               ))
                           .toList(),
                     ),
@@ -306,8 +309,13 @@ class _CourtModeRow extends StatelessWidget {
 class _PlayerRow extends StatelessWidget {
   final Player player;
   final PlayerRepository playerRepo;
+  final MatchRepository matchRepo;
 
-  const _PlayerRow({required this.player, required this.playerRepo});
+  const _PlayerRow({
+    required this.player,
+    required this.playerRepo,
+    required this.matchRepo,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -405,7 +413,7 @@ class _PlayerRow extends StatelessWidget {
             child: IconButton(
               icon: const Icon(Icons.close, size: 20),
               color: Colors.red,
-              onPressed: () => playerRepo.removePlayer(player.id),
+              onPressed: () => matchRepo.removePlayer(player.id),
             ),
           ),
         ],

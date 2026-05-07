@@ -175,6 +175,61 @@ class MatchRepository {
   }
 
   // ---------------------------------------------------------------------------
+  // Write: safely remove a player and cancel any matches they are in
+  // ---------------------------------------------------------------------------
+
+  Future<void> removePlayer(String playerId) async {
+    final matchSnap = await _db
+        .collection('matches')
+        .where('playerIds', arrayContains: playerId)
+        .where('status', whereIn: ['active', 'scheduled'])
+        .get();
+
+    final batch = _db.batch();
+    final now = DateTime.now();
+
+    for (final doc in matchSnap.docs) {
+      final match = Match.fromFirestore(doc);
+
+      batch.update(doc.reference, {
+        'status': MatchStatus.completed.name,
+        'completedAt': Timestamp.fromDate(now),
+      });
+
+      // Clear currentMatchId on any court pointing at this match.
+      final currentCourtSnap = await _db
+          .collection('courts')
+          .where('currentMatchId', isEqualTo: match.id)
+          .get();
+      for (final c in currentCourtSnap.docs) {
+        batch.update(c.reference, {'currentMatchId': null});
+      }
+
+      // Clear nextMatchId on any court pointing at this match.
+      final nextCourtSnap = await _db
+          .collection('courts')
+          .where('nextMatchId', isEqualTo: match.id)
+          .get();
+      for (final c in nextCourtSnap.docs) {
+        batch.update(c.reference, {'nextMatchId': null});
+      }
+
+      // Return other players in the match to waiting.
+      for (final pid in match.playerIds) {
+        if (pid != playerId) {
+          batch.update(_db.collection('players').doc(pid), {
+            'status': PlayerStatus.waiting.name,
+            'currentMatchId': null,
+          });
+        }
+      }
+    }
+
+    batch.delete(_db.collection('players').doc(playerId));
+    await batch.commit();
+  }
+
+  // ---------------------------------------------------------------------------
   // Write: reset the entire evening
   // ---------------------------------------------------------------------------
 
